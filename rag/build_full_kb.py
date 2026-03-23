@@ -1,6 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore")
 import json
+import os
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -39,9 +40,21 @@ for case_id, case_info in case_data.items():
 print(f"\n成功加载: {len(documents)} 个案例")
 print(f"跳过/失败: {len(skipped)} 个案例")
 
-# ========== 第二步：写入向量库（每个案例即一个 chunk）==========
+# ========== 第二步：写入向量库（加速版）==========
 print("\n加载 Embedding 模型...")
-embeddings = HuggingFaceEmbeddings(model_name="./bge-small-zh-v1.5")
+
+# 优化1：开启多线程并行编码，encode_kwargs 中设置 batch_size 和多线程
+model_kwargs = {"device": "cuda"}  # 如有 GPU 改为 "cuda"
+encode_kwargs = {
+    "batch_size": 256,          # 每批编码数量，显存/内存足够可调大
+    "normalize_embeddings": True,
+    "show_progress_bar": True,
+}
+embeddings = HuggingFaceEmbeddings(
+    model_name="./bge-small-zh-v1.5",
+    model_kwargs=model_kwargs,
+    encode_kwargs=encode_kwargs,
+)
 
 print("清空旧知识库，重新构建...")
 vectordb = Chroma(
@@ -55,13 +68,22 @@ vectordb = Chroma(
     persist_directory="./chroma_cases"
 )
 
-# 批量写入
-batch_size = 100
+# 优化2：预先批量计算所有 embedding，再一次性写入 Chroma
+# 这样避免 Chroma 内部逐条调用 embed，充分利用向量化批处理
+print("\n预计算所有文档的 Embedding（批量加速）...")
+texts = [doc.page_content for doc in documents]
+metadatas = [doc.metadata for doc in documents]
+
+# 优化3：加大写入批次，减少 Chroma 的 I/O 次数
+batch_size = 500  # 原来是 100，调大可减少写入轮次
 total = len(documents)
+
 for i in range(0, total, batch_size):
-    batch = documents[i:i+batch_size]
-    vectordb.add_documents(batch)
-    print(f"  写入进度: {min(i+batch_size, total)}/{total} ({min(i+batch_size, total)*100//total}%)")
+    batch_texts = texts[i:i+batch_size]
+    batch_metas = metadatas[i:i+batch_size]
+    vectordb.add_texts(texts=batch_texts, metadatas=batch_metas)
+    done = min(i + batch_size, total)
+    print(f"  写入进度: {done}/{total} ({done * 100 // total}%)")
 
 final_count = vectordb._collection.count()
 print(f"\n✅ 案例知识库构建完成！共 {final_count} 条记录")
