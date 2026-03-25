@@ -7,12 +7,10 @@ app.py —— 基于 Gradio 的 RAG Agent 可视化交互界面
     # 或指定端口
     python app.py --port 7860
 """
-import os
-# 禁用 tokenizers 并行，避免在 nohup/非 tty 环境下 fork 子进程时死锁
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import gradio as gr
+from gradio import ChatMessage
 from langchain_core.messages import HumanMessage, AIMessage
 
 # ========== 导入 Agent 核心（复用 rag_agent_local.py）==========
@@ -188,20 +186,24 @@ def build_ui():
         def bot_respond(history, sources):
             """流式生成 bot 回答，同步更新来源面板"""
             if not history:
-                return history, sources, format_sources_html(sources)
+                yield history, sources, format_sources_html(sources)
+                return
 
             user_msg = history[-1]["content"]
             # 去掉最后一条（用户消息），传入历史
             prev_history = history[:-1]
 
-            # 追加 assistant 占位消息
-            history = history + [{"role": "assistant", "content": ""}]
+            # 先 yield 一个占位消息，避免 content 为空
+            placeholder = ChatMessage(role="assistant", content="⏳ 思考中...")
+            yield history + [placeholder], sources, format_sources_html(sources)
 
+            final_history = history
             for partial_text, new_sources in chat_stream(user_msg, prev_history):
-                history[-1]["content"] = partial_text  # 更新最后一条的 bot 回答
+                bot_msg = ChatMessage(role="assistant", content=partial_text)
+                final_history = history + [bot_msg]
                 if new_sources:
                     sources = new_sources
-                yield history, sources, format_sources_html(sources)
+                yield final_history, sources, format_sources_html(sources)
 
         def clear_all():
             return [], [], "<div style='color:#888; padding:8px;'>暂无检索记录</div>"
