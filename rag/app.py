@@ -29,12 +29,13 @@ def chat_stream(user_message: str, history: list):
     rag_module._last_retrieved_docs = []
 
     # 构建消息历史（多轮对话）
+    # history 格式为旧版 Gradio: [[user_msg, bot_msg], ...]
     messages = []
-    for msg in history:
-        if msg["role"] == "user":
-            messages.append(HumanMessage(content=msg["content"]))
-        elif msg["role"] == "assistant":
-            messages.append(AIMessage(content=msg["content"]))
+    for user_msg, bot_msg in history:
+        if user_msg:
+            messages.append(HumanMessage(content=user_msg))
+        if bot_msg:
+            messages.append(AIMessage(content=bot_msg))
     messages.append(HumanMessage(content=user_message))
 
     # 流式调用 Agent
@@ -140,7 +141,6 @@ def build_ui():
                 chatbot = gr.Chatbot(
                     elem_id="chatbot",
                     label="对话",
-                    type="messages",
                     bubble_full_width=False,
                     show_copy_button=True,
                 )
@@ -180,7 +180,7 @@ def build_ui():
         def user_submit(user_msg, history):
             """用户提交后立即把用户消息加入历史，清空输入框"""
             history = history or []
-            history.append({"role": "user", "content": user_msg})
+            history.append([user_msg, None])  # [user, bot占位None]
             return "", history
 
         def bot_respond(history, sources):
@@ -188,15 +188,12 @@ def build_ui():
             if not history:
                 return history, sources, format_sources_html(sources)
 
-            user_msg = history[-1]["content"]
+            user_msg = history[-1][0]
             # 去掉最后一条（用户消息），传入历史
             prev_history = history[:-1]
 
-            # 追加 assistant 占位
-            history.append({"role": "assistant", "content": ""})
-
             for partial_text, new_sources in chat_stream(user_msg, prev_history):
-                history[-1]["content"] = partial_text
+                history[-1][1] = partial_text  # 更新最后一条的 bot 回答
                 if new_sources:
                     sources = new_sources
                 yield history, sources, format_sources_html(sources)
