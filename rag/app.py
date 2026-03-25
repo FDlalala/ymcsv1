@@ -142,8 +142,6 @@ def build_ui():
                     elem_id="chatbot",
                     label="对话",
                     type="messages",
-                    bubble_full_width=False,
-                    show_copy_button=True,
                 )
                 with gr.Row():
                     msg_input = gr.Textbox(
