@@ -41,21 +41,24 @@ def retrieve_context(query: str):
     print(f"[检索] 原始 query: {query}")
     print(f"[检索] 检索 top-k = {RETRIEVE_K}")
     # ---------- 执行检索 ----------
-    retrieved_docs = vectordb.similarity_search(query, k=RETRIEVE_K)
+    results_with_score = vectordb.similarity_search_with_score(query, k=RETRIEVE_K)
+    retrieved_docs = [doc for doc, _ in results_with_score]
     _last_retrieved_docs = retrieved_docs
     # ---------- 打印每条结果摘要 ----------
-    for i, doc in enumerate(retrieved_docs, 1):
-        title  = doc.metadata.get("case_name", doc.metadata.get("title", "未知标题"))
-        source = doc.metadata.get("case_id",   doc.metadata.get("source", "未知来源"))
+    for i, (doc, score) in enumerate(results_with_score, 1):
+        title   = doc.metadata.get("case_name", doc.metadata.get("title", "未知标题"))
+        source  = doc.metadata.get("case_id",   doc.metadata.get("source", "未知来源"))
         snippet = doc.page_content[:150].replace("\n", " ").strip()
+        similarity = 1 - score / 2  # 转换为相似度，方便直观理解
         print(f"  [{i}] 案例名: {title}")
         print(f"       案例ID: {source}")
+        print(f"       距离(score)={score:.4f}  相似度={similarity:.4f}")
         print(f"       摘要: {snippet}...")
     print("★"*50 + "\n")
     # ---------- 拼接返回字符串 ----------
     serialized = "\n\n".join(
         f"Source: {doc.metadata}\nContent: {doc.page_content}"
-        for doc in retrieved_docs
+        for doc, _ in results_with_score
     )
     return serialized, retrieved_docs
 
